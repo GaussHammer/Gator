@@ -1,16 +1,12 @@
 package main
 
 import (
-	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/GaussHammer/Gator/internal/config"
 	"github.com/GaussHammer/Gator/internal/database"
-	"github.com/google/uuid"
 	_ "github.com/lib/pq"
 )
 
@@ -41,6 +37,10 @@ func main() {
 	cmds.register("login", handlerLogin)
 	cmds.register("register", handlerRegister)
 	cmds.register("reset", handlerReset)
+	cmds.register("users", handlerGetUsers)
+	cmds.register("agg", handlerAggregate)
+	cmds.register("addfeed", handlerCreateFeed)
+	cmds.register("feeds", handlerFeeds)
 
 	if len(os.Args) < 2 {
 		fmt.Println("Error: not enough arguments provided")
@@ -80,68 +80,4 @@ func (c *commands) run(s *state, cmd command) error {
 		return fmt.Errorf("unknown command: %s", cmd.name)
 	}
 	return handler(s, cmd)
-}
-
-func handlerLogin(s *state, cmd command) error {
-	if len(cmd.args) == 0 {
-		return fmt.Errorf("There must be at least one argument")
-	}
-	name := cmd.args[0]
-	_, err := s.db.GetUser(context.Background(), name)
-	if err != nil {
-		// User doesn't exist
-		fmt.Println("User does not exist!")
-		os.Exit(1)
-	}
-	err = s.cfg.SetUser(cmd.args[0])
-	if err != nil {
-		return fmt.Errorf("Couldn't set the new user %w", err)
-	}
-	fmt.Println("user has been set")
-	return nil
-}
-
-func handlerRegister(s *state, cmd command) error {
-	if len(cmd.args) < 1 {
-		fmt.Println("Usage: register <name>")
-		return errors.New("missing name argument")
-	}
-	name := cmd.args[0]
-	_, err := s.db.GetUser(context.Background(), name)
-	if err == nil {
-		fmt.Println("This user already exists!")
-		os.Exit(1)
-	}
-	params := database.CreateUserParams{
-		ID:        uuid.New(),
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-		Name:      name,
-	}
-
-	// Now pass the params struct to CreateUser
-	user, err := s.db.CreateUser(context.Background(), params)
-	if err != nil {
-		fmt.Println("Error inserting new user", err)
-		os.Exit(1)
-	}
-
-	err = s.cfg.SetUser(user.Name)
-	if err != nil {
-		fmt.Println("could not set the user")
-		os.Exit(1)
-	}
-	fmt.Printf("user %s was created\n", user.Name)
-	fmt.Printf("User details: ID=%s, CreatedAt=%v, UpdatedAt=%v\n",
-		user.ID, user.CreatedAt, user.UpdatedAt)
-	return nil
-}
-
-func handlerReset(s *state, cmd command) error {
-	err := s.db.ResetUsers(context.Background())
-	if err != nil {
-		fmt.Println("Error deleting users")
-		os.Exit(1)
-	}
-	return nil
 }
