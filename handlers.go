@@ -91,23 +91,29 @@ func handlerGetUsers(s *state, cmd command) error {
 	return nil
 }
 
-func handlerAggregate(s *state, cmd command) error {
-	result, err := fetchFeed(context.Background(), "https://www.wagslane.dev/index.xml")
-	if err != nil {
-		return err
+func handlerAggregate(s *state, cmd command, u database.User) error {
+	if len(cmd.args) < 1 {
+		return fmt.Errorf("Please provide the time between requests (e.g 1s, 1m, 1h)")
 	}
-	fmt.Printf("Title: %s\nDescription: %s\nLink: %s\n\n", result.Channel.Title, result.Channel.Description, result.Channel.Link)
-	for i := range result.Channel.Item {
-		fmt.Println(result.Channel.Item[i].Title)
-		fmt.Println(result.Channel.Item[i].Description)
-		fmt.Println(result.Channel.Item[i].Link)
-		fmt.Println(result.Channel.Item[i].PubDate)
-		fmt.Println("\n")
+
+	timeBetweenReqs, err := time.ParseDuration(cmd.args[0])
+	if err != nil {
+		return fmt.Errorf("invalid duration format: %v", err)
+	}
+
+	fmt.Printf("Collecting feeds every: %v\n", timeBetweenReqs)
+	ticker := time.NewTicker(timeBetweenReqs)
+
+	for ; ; <-ticker.C {
+		if err := scrapeFeeds(s); err != nil {
+			fmt.Printf("Error scraping feeds: %v\n", err)
+			// Continue even if there's an error
+		}
 	}
 	return nil
 }
 
-func handlerCreateFeed(s *state, cmd command) error {
+func handlerCreateFeed(s *state, cmd command, u database.User) error {
 	if len(cmd.args) < 2 {
 		fmt.Println("Usage: addfeed \"feed name\" \"feed url\"")
 		return fmt.Errorf("not enough arguments")
@@ -116,10 +122,11 @@ func handlerCreateFeed(s *state, cmd command) error {
 	name := cmd.args[0]
 	url := cmd.args[1]
 
-	user, err := s.db.GetUser(context.Background(), s.cfg.CurrentUserName)
-	if err != nil {
-		return fmt.Errorf("could not get the current user: %w", err)
-	}
+	user := u
+	//user, err := s.db.GetUser(context.Background(), s.cfg.CurrentUserName)
+	//if err != nil {
+	//	return fmt.Errorf("could not get the current user: %w", err)
+	//}
 
 	// Create the feed using the SQLC generated function
 	feed, err := s.db.CreateFeed(context.Background(), database.CreateFeedParams{
@@ -134,6 +141,14 @@ func handlerCreateFeed(s *state, cmd command) error {
 		return fmt.Errorf("error creating feed: %w", err)
 	}
 
+	follow, err := s.db.CreateFeedFollow(context.Background(), database.CreateFeedFollowParams{
+		ID:        uuid.New(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		UserID:    user.ID,
+		FeedID:    feed.ID,
+	})
+
 	// Print the feed details
 	fmt.Println("Feed created successfully!")
 	fmt.Printf("ID: %s\n", feed.ID)
@@ -142,7 +157,7 @@ func handlerCreateFeed(s *state, cmd command) error {
 	fmt.Printf("User ID: %s\n", feed.UserID)
 	fmt.Printf("Created At: %v\n", feed.CreatedAt)
 	fmt.Printf("Updated At: %v\n", feed.UpdatedAt)
-
+	fmt.Println(follow.FeedName)
 	return nil
 }
 
@@ -153,6 +168,58 @@ func handlerFeeds(s *state, cmd command) error {
 	}
 	for _, feed := range results {
 		fmt.Printf("Name: %s, URL: %s, Creator: %s\n", feed.Name, feed.Url, feed.Name_2)
+	}
+	return nil
+}
+
+func handlerFollow(s *state, cmd command, u database.User) error {
+	if len(cmd.args) < 1 {
+		return fmt.Errorf("Not enough arguments, needs an URL")
+	}
+	feed, err := s.db.SelectFeedByUrl(context.Background(), cmd.args[0])
+	if err != nil {
+		return err
+	}
+	user := u
+	feedId := feed.ID
+	userId := user.ID
+
+	follow, err := s.db.CreateFeedFollow(context.Background(), database.CreateFeedFollowParams{
+		ID:        uuid.New(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		UserID:    userId,
+		FeedID:    feedId,
+	})
+	if err != nil {
+		return fmt.Errorf("could not create the feed follow")
+	}
+
+	fmt.Printf("feed: %s, user: %s\n", follow.FeedName, follow.UserName)
+	return nil
+}
+
+func handlerFollowing(s *state, cmd command) error {
+	following, err := s.db.GetFeedFollowsForUser(context.Background(), s.cfg.CurrentUserName)
+	if err != nil {
+		return fmt.Errorf("could not bring the feeds that the user follows")
+	}
+	for _, feed := range following {
+		fmt.Printf("User: %s, Feed: %s\n", feed.UserName, feed.FeedName)
+	}
+	return nil
+}
+
+func handlerUnfollow(s *state, cmd command, u database.User) error {
+	if len(cmd.args) < 1 {
+		return fmt.Errorf("Unfollow needs the URL of the site")
+	}
+	err := s.db.DeleteFeedFollowRecord(context.Background(), database.DeleteFeedFollowRecordParams{
+		UserID: u.ID,
+		Url:    cmd.args[0],
+	})
+	if err != nil {
+		return err
 	}
 	return nil
 }
