@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/GaussHammer/Gator/internal/database"
@@ -69,7 +70,7 @@ func handlerRegister(s *state, cmd command) error {
 func handlerReset(s *state, cmd command) error {
 	err := s.db.ResetUsers(context.Background())
 	if err != nil {
-		fmt.Println("Error deleting users")
+		fmt.Printf("Error deleting users: %v", err)
 		os.Exit(1)
 	}
 	return nil
@@ -220,6 +221,39 @@ func handlerUnfollow(s *state, cmd command, u database.User) error {
 	})
 	if err != nil {
 		return err
+	}
+	return nil
+}
+
+func handlerBrowse(s *state, cmd command, u database.User) error {
+	var limit int
+	if len(cmd.args) < 1 {
+		limit = 2
+	} else {
+		var err error
+		limit, err = strconv.Atoi(cmd.args[0])
+		if err != nil {
+			return fmt.Errorf("limit must be a valid number")
+		}
+	}
+	posts, err := s.db.GetPostsForUser(context.Background(), database.GetPostsForUserParams{
+		UserID: u.ID,
+		Limit:  int32(limit),
+	})
+	if err != nil {
+		return fmt.Errorf("couldn't get the posts for the current user")
+	}
+	fmt.Printf("retrived posts: %d\n", len(posts))
+	fmt.Printf("user Id: %s\n", u.ID)
+	for _, items := range posts {
+		fmt.Println(items.Title)
+		fmt.Printf("\n")
+		fmt.Println("Url: " + items.Url)
+		fmt.Printf("\n")
+		fmt.Println("Description: " + items.Description)
+		fmt.Printf("\n")
+		fmt.Println(items.PublishedAt)
+
 	}
 	return nil
 }
